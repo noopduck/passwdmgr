@@ -1,0 +1,211 @@
+#!/usr/bin/env python3
+from getpass import getpass
+from os import system
+import JsonParser
+import Crypto
+from datetime import datetime
+import re
+import json
+import requests
+from requests.packages.urllib3.exceptions import InsecureRequestWarning
+
+requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+
+class Terminal():
+
+    ds = None
+    username = None
+    masterpassword = None
+    session = None
+    token = None
+
+    def __init__(self, username, masterpassword):
+        self.session = requests.Session()
+        self.session.verify = False
+        self.username = username
+        if self.username ==  "":
+            self.registerLogin()
+        
+        self.masterpassword = masterpassword
+        self.c = Crypto.Crypto(f"{self.username}{self.masterpassword}")
+        self.login()
+
+    def get(self, route=None, data=None, headers=None):
+        res = self.session.get(f"https://127.0.0.1{route}", data=data, headers=headers)
+        return res
+
+    def post(self, route=None, data=None, headers=None):
+        res = self.session.post(f"https://127.0.0.1{route}", data=data, headers=headers)
+        return res
+
+
+    def header(self):
+
+        header = {'Authorization': f'Token {self.token}'}
+        return header
+
+    def registerLogin(self):
+        """
+            This function produces a hash of the email + master password
+            this hash becomes the password that will be registered with
+            the login server.
+
+            This function hides the masterpassword in a strong hash, in order
+            to avoid that the server can pick up the vault key (master password)
+    
+        """
+
+        print("Entered user registration\n\n############################")
+
+        self.username = input("Enter email address: ")
+        self.masterpassword = getpass("Enter password: ")
+        self.masterpasswordConf = getpass("Verify password: ")
+        if not self.masterpassword == self.masterpasswordConf:
+            print("Try again, password did not match")
+            self.registerLogin()
+
+        self.c = Crypto.Crypto(f"{self.username}{self.masterpassword}")
+        print(f"REGISTRATION CRYPTO KEY: {self.c.getKey()}")
+
+        data = {
+            "username": f"{self.username}",
+            "password": f"{self.c.getKey()}",
+            "password2": f"{self.c.getKey()}",
+            "email": f"{self.username}",
+            "first_name": f"{input('Enter name: ')}",
+            "last_name": f"{input('Enter last name: ')}"
+        }
+        res = self.post(f"/api/register/", data=data)
+        print(res.text)
+
+        self.login()
+        blankBlob = self.encryptBlob(self.createBlank().encode('utf-8'))
+        self.updateBlob(blankBlob)
+
+    def login(self):
+
+        data = {
+            'username': f'{self.username}',
+            'password': f'{self.c.getKey()}',
+        }
+
+        res = self.post("/api/login/", data=data)
+        
+        try:
+            self.token = json.loads(res.text)["token"]
+        except Exception as identifier:
+            print(f"Error {identifier}")
+            exit(1)
+
+    def findSite(self):
+        blob = self.decryptBlob()
+        json = JsonParser.JsonParser().parseFile(blob)
+
+        searchText = input("Enter site name to search for: ")
+
+        for k in json.sites.keys():
+            if re.match(".*" + searchText + ".*", k):
+                print(k)
+
+    def listAllSites(self):
+        blob = self.decryptBlob()
+        json = JsonParser.JsonParser().parseFile(blob)
+        
+        for k in json.sites.keys():
+            print(k)
+
+    def showSite(self):
+        blob = self.decryptBlob()
+        json = JsonParser.JsonParser().parseFile(blob)
+
+        site = json.sites.pop(input("Type in site name to display details for: "))
+        print(f"Username: {site['user']}\nPassword: {site['password']}\nDate: {site['date']}")
+
+    def addSite(self):
+        blob = self.decryptBlob()
+        json = JsonParser.JsonParser().parseFile(blob)
+
+        site = dict()
+        site.update({"user": input("Enter username for new site: ")})
+        site.update({"password": input("Enter password for new site: ")})
+        site.update({"date": datetime.today().isoformat()})
+        json.sites.update({input("Enter the name of the site: "): site})
+        blob = JsonParser.JsonParser().updateJson(json)
+
+        encBlob = self.encryptBlob(blob.encode('utf-8'))
+
+        self.updateBlob(encBlob)
+        print(f"Blob has been updated: {encBlob}")
+
+    def createBlank(self):
+        user = JsonParser.User(self.username)
+        site = JsonParser.Sites("","",datetime.today().isoformat())
+
+        json = JsonParser.JsonBlob(user, site)
+        blob = JsonParser.JsonParser().updateJson(json)
+
+        return blob
+
+    def decryptBlob(self):
+        """
+            Grab blob from database and decrypt it's content
+        """
+        res = self.get("/api/usersite/", headers=self.header())
+
+        encBlob = json.loads(res.text)["blob"].replace("b'", "").replace("'", "")
+        blob = self.c.decrypt(encBlob.encode('utf-8'))
+
+        return bytes(blob).decode('UTF-8')
+
+    def encryptBlob(self, blob):
+        """
+            Grab the unencrypted json file and encrypt it's content
+        """
+        
+        encBlob = self.c.encrypt(blob)
+
+        return encBlob
+
+    def updateBlob(self, encBlob):
+        data = {
+            "blob": f"{encBlob}",
+        }
+
+        res = self.post(f"/api/usersite/", data=data, headers=self.header())
+        print(res.text)
+
+    def quit(self):
+        #self.get('/logout')
+        exit(0)
+
+if __name__ == "__main__":
+    username = input("Enter your username or hit enter to register: ")
+    passwd = None
+    if username:
+        passwd = getpass("Enter your password: ")
+
+
+    t = Terminal(username, passwd)
+
+    functions = dict()
+    functions.update({"1": t.listAllSites})
+    functions.update({"2": t.findSite})
+    functions.update({"3": t.showSite})
+    functions.update({"4": t.addSite})
+    functions.update({"5": t.quit})
+    
+    while(True):
+        system("clear")
+
+        print("List all sites: 1\nSearch for site: 2\nGet login details from site: 3\nAdd or update site: 4\n\nQuit: 5\n\n")
+        number = input("Enter your choise: ")
+        if number.isnumeric():
+            if int(number) <= 10 and int(number) >= 1:
+                functions[str(number)]()
+            else:
+                print("Invalid number")
+        else:
+            print("Invalid option")
+        input("")
+
+""" stuff to keep for later """

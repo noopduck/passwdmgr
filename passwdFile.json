@@ -1,0 +1,17 @@
+{
+    "user": {
+        "user": "randomUser@smail.com"
+    },
+    "sites": {
+        "facebook.com": {
+            "user": "randomUser@smail.com",
+            "password": "p@$$w0rd",
+            "date": "2020-11-15T22:15"
+        },
+        "nextflix.com": {
+            "user": "randomUser@smail.com",
+            "password": "An0th3rP4s$w0rd",
+            "date": "2020-11-15T22:15"
+        }
+    }
+}
